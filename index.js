@@ -1,17 +1,14 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
-// Поддержка UTF-8
-app.use(express.static('public', { 
-  setHeaders: (res, path) => {
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  }
-}));
+// Поддержка статических файлов
+app.use(express.static('public'));
 
 io.on('connection', (socket) => {
   console.log('Пользователь подключился');
@@ -42,6 +39,6 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(3000, () => {
-  console.log('✅ Сервер запущен на http://localhost:3000');
+server.listen(3001, () => {
+  console.log('✅ Сервер запущен на http://localhost:3001');
 });

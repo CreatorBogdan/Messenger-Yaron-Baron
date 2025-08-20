@@ -322,11 +322,6 @@
       animation: cosmosPan 20s linear infinite;
     }
 
-    @keyframes cosmosPan {
-      0% { background-position: 0% 0%; }
-      100% { background-position: 200% 200%; }
-    }
-
     .toggle:active + .slider .toggle-orb {
       transform: scale(0.95);
     }
@@ -509,30 +504,9 @@
       if (e.key === 'Enter') send();
     });
 
-    // === Мини-игра: Stick Fight (с анимацией спрайтов) ===
+    // === Мини-игра: Stick Fight (с анимациями из спрайтшита) ===
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-
-    // Загрузка спрайтов
-    const idleImage = new Image();
-    idleImage.src = '/images/Idle-Sheet.png';
-
-    const runImage = new Image();
-    runImage.src = '/images/Run-Sheet.png';
-
-    const attackImage = new Image();
-    attackImage.src = '/images/Attack-01-Sheet.png';
-
-    const deathImage = new Image();
-    deathImage.src = '/images/Dead-Sheet.png';
-
-    // Данные анимаций
-    const animations = {
-      idle: { image: idleImage, width: 32, height: 48, frameCount: 3 },
-      run: { image: runImage, width: 32, height: 48, frameCount: 4 },
-      attack: { image: attackImage, width: 32, height: 48, frameCount: 1 },
-      death: { image: deathImage, width: 32, height: 48, frameCount: 1 }
-    };
 
     // Игрок
     let player = {
@@ -543,9 +517,9 @@
       dead: false,
       respawnTime: 0,
       lastAttack: 0,
-      frame: 0,
       direction: 'right',
-      action: 'idle'
+      state: 'idle',
+      frameTime: 0
     };
 
     // Другие игроки
@@ -555,8 +529,7 @@
     const keys = {};
     let horizontal = 0;
     let vertical = 0;
-    const moveLimiter = 0.7;
-    const runSpeed = 3;
+    const moveSpeed = 3;
 
     window.addEventListener('keydown', (e) => {
       keys[e.key.toLowerCase()] = true;
@@ -565,129 +538,360 @@
       keys[e.key.toLowerCase()] = false;
     });
 
-    // Рисуем спрайт
-    function drawSprite(x, y, anim, frame, flip = false) {
-      const { image, width, height } = anim;
-      const sx = frame * width;
-      const sy = 0;
-
-      ctx.save();
-      if (flip) {
-        ctx.scale(-1, 1);
-        ctx.translate(-x * 2, 0);
+    // Класс для работы с XML спрайтшитами
+    class XmlSpriteSheet {
+      constructor(imageSrc, xmlSrc) {
+        this.image = new Image();
+        this.image.src = imageSrc;
+        this.xmlSrc = xmlSrc;
+        this.frames = {};
+        this.loaded = false;
+        
+        this.image.onload = () => {
+          console.log('🖼️ Изображение загружено:', imageSrc);
+          this.loadXml();
+        };
+        
+        this.image.onerror = (err) => {
+          console.error('❌ Ошибка загрузки изображения:', imageSrc, err);
+        };
       }
-      ctx.drawImage(image, sx, sy, width, height, x - width / 2, y - height / 2, width, height);
+
+      async loadXml() {
+        try {
+          console.log('📥 Загрузка XML:', this.xmlSrc);
+          const response = await fetch(this.xmlSrc);
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          const xmlText = await response.text();
+          const parser = new DOMParser();
+          const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+          
+          const frameElements = xmlDoc.querySelectorAll('frame');
+          console.log('📊 Найдено кадров в XML:', frameElements.length);
+          
+          frameElements.forEach(frame => {
+            const name = frame.getAttribute('name');
+            this.frames[name] = {
+              x: parseInt(frame.getAttribute('x')),
+              y: parseInt(frame.getAttribute('y')),
+              width: parseInt(frame.getAttribute('width')),
+              height: parseInt(frame.getAttribute('height'))
+            };
+          });
+          
+          this.loaded = true;
+          console.log('✅ Спрайтшит загружен! Кадры:', Object.keys(this.frames).slice(0, 5));
+        } catch (error) {
+          console.error('❌ Ошибка загрузки XML:', error);
+        }
+      }
+
+      getFrame(name) {
+        return this.frames[name];
+      }
+
+      draw(ctx, frameName, x, y, flip = false, scale = 1) {
+        if (!this.loaded || !this.frames[frameName]) {
+          return;
+        }
+        
+        const frame = this.frames[frameName];
+        const img = this.image;
+        
+        ctx.save();
+        
+        ctx.translate(x, y);
+        if (flip) {
+          ctx.scale(-scale, scale);
+        } else {
+          ctx.scale(scale, scale);
+        }
+        
+        ctx.drawImage(
+          img,
+          frame.x, frame.y,
+          frame.width, frame.height,
+          -frame.width / 2, -frame.height / 2,
+          frame.width, frame.height
+        );
+        
+        ctx.restore();
+      }
+    }
+
+    // Создаем все спрайтшиты из Assets Pack (с правильными названиями)
+    const characterSheet = new XmlSpriteSheet(
+      '/Assets/Spritesheets/spritesheet-characters-default.png',
+      '/Assets/Spritesheets/spritesheet-characters-default.xml'
+    );
+
+    const backgroundSheet = new XmlSpriteSheet(
+      '/Assets/Spritesheets/spritesheet-backgrounds-default.png',
+      '/Assets/Spritesheets/spritesheet-backgrounds-default.xml'
+    );
+
+    const tilesSheet = new XmlSpriteSheet(
+      '/Assets/Spritesheets/spritesheet-tiles-default.png',
+      '/Assets/Spritesheets/spritesheet-tiles-default.xml'
+    );
+
+    const enemiesSheet = new XmlSpriteSheet(
+      '/Assets/Spritesheets/spritesheet-enemies-default.png',
+      '/Assets/Spritesheets/spritesheet-enemies-default.xml'
+    );
+
+    // Загружаем все спрайтшиты с отладкой
+    const allSheets = [
+      { sheet: characterSheet, name: 'characters' },
+      { sheet: backgroundSheet, name: 'backgrounds' },
+      { sheet: tilesSheet, name: 'tiles' },
+      { sheet: enemiesSheet, name: 'enemies' }
+    ];
+
+    let loadedSheets = 0;
+
+    function checkAllLoaded(sheetName) {
+      loadedSheets++;
+      console.log(`✅ Загружен спрайтшит: ${sheetName} (${loadedSheets}/${allSheets.length})`);
+      
+      if (loadedSheets === allSheets.length) {
+        console.log('🎮 Все спрайтшиты загружены! Игра готова!');
+        requestAnimationFrame(animate);
+      }
+    }
+
+    // Назначаем обработчики для всех спрайтшитов
+    allSheets.forEach(item => {
+      item.sheet.loadXml().then(() => {
+        checkAllLoaded(item.name);
+        console.log(`🔍 Кадры ${item.name}:`, Object.keys(item.sheet.frames).slice(0, 5));
+      }).catch(err => {
+        console.error(`❌ Ошибка загрузки спрайтшита ${item.name}:`, err);
+        checkAllLoaded(item.name); // Продолжаем даже если какой-то спрайтшит не загрузился
+      });
+    });
+
+    // Таймаут на случай, если что-то не загрузится
+    setTimeout(() => {
+      if (loadedSheets < allSheets.length) {
+        console.log('⚠️ Не все спрайтшиты загрузились, запускаем с тем, что есть');
+        requestAnimationFrame(animate);
+      }
+    }, 10000);
+
+    // Рисуем простую голову (временно)
+    function drawHead(x, y, nickname, color = '#3498db', direction = 'right') {
+      ctx.save();
+      
+      // Применяем отражение для направления
+      if (direction === 'left') {
+        ctx.translate(2 * x, 0);
+        ctx.scale(-1, 1);
+      }
+      
+      // Голова
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, 15, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Глаза
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.arc(x - 5, y - 3, 3, 0, Math.PI * 2);
+      ctx.arc(x + 5, y - 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Зрачки
+      ctx.fillStyle = 'black';
+      ctx.beginPath();
+      ctx.arc(x - 5, y - 3, 1.5, 0, Math.PI * 2);
+      ctx.arc(x + 5, y - 3, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Рот
+      ctx.strokeStyle = '#e74c3c';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y + 5, 6, 0, Math.PI);
+      ctx.stroke();
+      
+      ctx.restore();
+      
+      // Ник над головой
+      ctx.save();
+      ctx.font = '12px Arial';
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'center';
+      ctx.fillText(nickname, x, y - 25);
       ctx.restore();
     }
 
     // Обновление физики
-    function updatePhysics() {
+    function updatePhysics(deltaTime) {
       horizontal = 0;
       vertical = 0;
 
+      // Проверяем WASD и стрелки
       if (keys['w'] || keys['arrowup']) vertical = -1;
       if (keys['s'] || keys['arrowdown']) vertical = 1;
       if (keys['a'] || keys['arrowleft']) horizontal = -1;
       if (keys['d'] || keys['arrowright']) horizontal = 1;
 
-      // Диагональ
-      if (horizontal !== 0 && vertical !== 0) {
-        horizontal *= moveLimiter;
-        vertical *= moveLimiter;
-      }
-
-      // Действие
-      if (horizontal !== 0 || vertical !== 0) {
-        player.action = 'run';
-        player.direction = horizontal > 0 ? 'right' : 'left';
-      } else if (keys[' '] && Date.now() - player.lastAttack > 500) {
-        player.action = 'attack';
-        player.lastAttack = Date.now();
+      // Обновляем анимацию
+      player.frameTime += deltaTime;
+      
+      // Определяем состояние
+      if (!player.dead) {
+        if (horizontal !== 0 || vertical !== 0) {
+          player.state = 'run';
+        } else {
+          player.state = 'idle';
+        }
       } else {
-        player.action = 'idle';
-      }
-
-      // Анимация
-      if (player.action === 'run' || player.action === 'idle') {
-        player.frame = (player.frame + 1) % 10;
+        player.state = 'death';
       }
 
       // Применяем скорость
       if (!player.dead) {
-        player.x += horizontal * runSpeed;
-        player.y += vertical * runSpeed;
+        player.x += horizontal * moveSpeed;
+        player.y += vertical * moveSpeed;
 
-        player.x = Math.max(15, Math.min(canvas.width - 15, player.x));
-        player.y = Math.max(15, Math.min(canvas.height - 15, player.y));
+        // Ограничиваем движение границами канваса
+        player.x = Math.max(20, Math.min(canvas.width - 20, player.x));
+        player.y = Math.max(20, Math.min(canvas.height - 20, player.y));
+        
+        // Определяем направление
+        if (horizontal !== 0) {
+          player.direction = horizontal > 0 ? 'right' : 'left';
+        }
       } else {
-        player.action = 'death';
         if (Date.now() > player.respawnTime) {
           player.dead = false;
           player.health = 100;
           player.x = Math.random() * (canvas.width - 100) + 50;
           player.y = Math.random() * (canvas.height - 100) + 50;
-          player.action = 'idle';
         }
       }
     }
 
-    // Отрисовка
+    // Отрисовка с анимациями
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Рисуем себя
-      const anim = animations[player.action];
-      const frame = player.action === 'idle' ? Math.floor(player.frame / 3) % 3 : 
-                    player.action === 'run' ? Math.floor(player.frame / 2) % 4 : 0;
+      // Отладка - показываем что загружено
+      ctx.save();
+      ctx.font = '12px Arial';
+      ctx.fillStyle = 'black';
+      ctx.textAlign = 'left';
+      ctx.fillText(`Загружено спрайтов: ${loadedSheets}/${allSheets.length}`, 10, 20);
+      ctx.fillText(`Персонаж загружен: ${characterSheet.loaded}`, 10, 40);
+      ctx.fillText(`Фон загружен: ${backgroundSheet.loaded}`, 10, 60);
+      ctx.restore();
 
-      drawSprite(player.x, player.y, anim, frame, player.direction === 'left');
+      // Рисуем фон
+      if (backgroundSheet.loaded) {
+        const backgroundFrames = Object.keys(backgroundSheet.frames);
+        if (backgroundFrames.length > 0) {
+          const bgFrame = backgroundFrames[0];
+          for (let x = 0; x < canvas.width; x += 100) {
+            for (let y = 0; y < canvas.height; y += 100) {
+              backgroundSheet.draw(ctx, bgFrame, x, y, false, 0.5);
+            }
+          }
+        }
+      } else {
+        // Простой фон если спрайты не загрузились
+        ctx.fillStyle = '#87CEEB';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
 
-      // Рисуем других
+      // Рисуем тайлы пола
+      if (tilesSheet.loaded) {
+        const tileFrames = Object.keys(tilesSheet.frames);
+        if (tileFrames.length > 0) {
+          const floorTile = tileFrames.find(name => name.includes('grass') || name.includes('ground')) || tileFrames[0];
+          for (let x = 0; x < canvas.width; x += 32) {
+            tilesSheet.draw(ctx, floorTile, x, canvas.height - 20, false, 1);
+          }
+        }
+      }
+
+      // Рисуем себя с анимацией
+      if (characterSheet.loaded) {
+        let frameName = 'idle_0';
+        
+        if (player.state === 'run' && characterSheet.frames['run_0']) {
+          // Анимация бега
+          const runFrames = ['run_0', 'run_1', 'run_2', 'run_3', 'run_4', 'run_5'];
+          const frameIndex = Math.floor(player.frameTime * 12) % runFrames.length;
+          frameName = runFrames[frameIndex];
+        } else if (player.state === 'death' && characterSheet.frames['death_0']) {
+          // Анимация смерти
+          frameName = 'death_0';
+        } else {
+          // Анимация покоя
+          const idleFrames = ['idle_0', 'idle_1', 'idle_2'];
+          const frameIndex = Math.floor(player.frameTime * 6) % idleFrames.length;
+          frameName = idleFrames[frameIndex];
+        }
+        
+        characterSheet.draw(ctx, frameName, player.x, player.y, player.direction === 'left', 0.8);
+      } else {
+        // Иначе рисуем простую голову
+        drawHead(player.x, player.y, player.nickname, '#3498db', player.direction);
+      }
+
+      // Рисуем других игроков
       for (const id in otherPlayers) {
         const p = otherPlayers[id];
-        if (p.dead) {
-          drawSprite(p.x, p.y, animations.death, 0);
+        if (characterSheet.loaded) {
+          const otherFrame = p.dead ? 'death_0' : 'idle_0';
+          characterSheet.draw(ctx, otherFrame, p.x, p.y, p.direction === 'left', 0.8);
         } else {
-          const a = animations[p.action] || animations.idle;
-          const f = p.action === 'run' ? Math.floor(p.frame / 2) % 4 : 0;
-          drawSprite(p.x, p.y, a, f, p.direction === 'left');
+          drawHead(p.x, p.y, p.nickname, '#e74c3c', p.direction);
         }
       }
     }
 
     // Главный цикл
-    function animate() {
-      updatePhysics();
+    let lastTime = 0;
+    function animate(currentTime) {
+      const deltaTime = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
+
+      updatePhysics(deltaTime);
       render();
       requestAnimationFrame(animate);
     }
 
-    // Запуск
-    idleImage.onload = () => {
-      runImage.onload = () => {
-        attackImage.onload = () => {
-          deathImage.onload = () => {
-            requestAnimationFrame(animate);
-          };
-        };
-      };
-    };
-
-    // Отправка данных
+    // Отправка данных о движении
     setInterval(() => {
-      socket.emit('player move', {
-        x: player.x,
-        y: player.y,
-        id: nickname,
-        health: player.health,
-        dead: player.dead,
-        action: player.action,
-        direction: player.direction,
-        frame: player.frame
-      });
+      if (!player.dead) {
+        socket.emit('player move', {
+          x: player.x,
+          y: player.y,
+          id: nickname,
+          health: player.health,
+          dead: player.dead,
+          direction: player.direction,
+          nickname: player.nickname,
+          state: player.state
+        });
+      }
     }, 100);
 
-    // Получение других игроков
+    // Атака пробелом
+    window.addEventListener('keydown', (e) => {
+      if (e.key === ' ' && !player.dead && Date.now() - player.lastAttack > 500) {
+        player.lastAttack = Date.now();
+        socket.emit('player attack', { id: nickname });
+      }
+    });
+
+    // Получение движения других игроков
     socket.on('player move', (data) => {
       const id = data.id;
       if (id !== nickname) {
@@ -695,48 +899,28 @@
           otherPlayers[id] = {
             x: data.x,
             y: data.y,
-            nickname: id,
+            nickname: data.nickname || id,
             health: data.health || 100,
             dead: data.dead || false,
-            action: data.action || 'idle',
             direction: data.direction || 'right',
-            frame: data.frame || 0
+            state: data.state || 'idle'
           };
         } else {
-          otherPlayers[id].x += (data.x - otherPlayers[id].x) * 0.1;
-          otherPlayers[id].y += (data.y - otherPlayers[id].y) * 0.1;
+          // Плавная интерполяция
+          otherPlayers[id].x += (data.x - otherPlayers[id].x) * 0.3;
+          otherPlayers[id].y += (data.y - otherPlayers[id].y) * 0.3;
           otherPlayers[id].health = data.health;
           otherPlayers[id].dead = data.dead;
-          otherPlayers[id].action = data.action;
           otherPlayers[id].direction = data.direction;
-          otherPlayers[id].frame = data.frame;
+          otherPlayers[id].nickname = data.nickname || id;
+          otherPlayers[id].state = data.state || 'idle';
         }
       }
     });
 
     // Получение атаки
     socket.on('player attack', (data) => {
-      const attacker = otherPlayers[data.id];
-      if (!attacker || attacker.dead) return;
-
-      for (const id in otherPlayers) {
-        const p = otherPlayers[id];
-        if (p.dead) continue;
-
-        const dx = p.x - attacker.x;
-        const dy = p.y - attacker.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance < 40) {
-          p.health = Math.max(0, p.health - 25);
-          socket.emit('player damage', { id: p.nickname });
-
-          if (p.health <= 0) {
-            p.dead = true;
-            p.respawnTime = Date.now() + 3000;
-          }
-        }
-      }
+      // Анимация атаки других игроков
     });
 
     // Получение урона
